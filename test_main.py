@@ -1,6 +1,9 @@
 """Tests for the Docking app."""
 
+import json
 import pytest
+from pathlib import Path
+from unittest.mock import patch
 from main import (
     calculate_distance,
     calculate_speed,
@@ -11,6 +14,10 @@ from main import (
     calculate_score,
     get_score_rating,
     get_score_color,
+    load_high_scores,
+    save_high_scores,
+    add_high_score,
+    get_high_scores,
     Difficulty,
     DIFFICULTIES,
     THRUST_POWER,
@@ -22,6 +29,7 @@ from main import (
     SCORE_FUEL_MULTIPLIER,
     SCORE_SOFT_DOCK_BONUS,
     SCORE_SOFT_DOCK_THRESHOLD,
+    MAX_HIGH_SCORES,
     COLOR_NORMAL,
     COLOR_SUCCESS,
     COLOR_WARNING,
@@ -380,3 +388,98 @@ class TestDifficulty:
             assert hasattr(diff, 'docking_max_velocity')
             assert hasattr(diff, 'start_distance_factor')
             assert hasattr(diff, 'score_multiplier')
+
+
+class TestHighScores:
+    """Tests for high score system."""
+
+    @pytest.fixture
+    def temp_scores_file(self, tmp_path):
+        """Create a temporary high scores file."""
+        return tmp_path / "test_highscores.json"
+
+    def test_load_empty_scores(self, temp_scores_file):
+        """Loading from non-existent file returns empty dict."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            scores = load_high_scores()
+            assert scores == {}
+
+    def test_save_and_load_scores(self, temp_scores_file):
+        """Saved scores should be loadable."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            test_scores = {"NORMAL": [1000, 800, 600]}
+            save_high_scores(test_scores)
+            loaded = load_high_scores()
+            assert loaded == test_scores
+
+    def test_add_first_high_score(self, temp_scores_file):
+        """Adding first score should return rank 1."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            rank = add_high_score("NORMAL", 500)
+            assert rank == 1
+
+    def test_add_higher_score(self, temp_scores_file):
+        """Higher score should become rank 1."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            add_high_score("NORMAL", 500)
+            rank = add_high_score("NORMAL", 800)
+            assert rank == 1
+
+    def test_add_lower_score(self, temp_scores_file):
+        """Lower score should get lower rank."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            add_high_score("NORMAL", 800)
+            rank = add_high_score("NORMAL", 500)
+            assert rank == 2
+
+    def test_max_high_scores_limit(self, temp_scores_file):
+        """Should only keep MAX_HIGH_SCORES scores."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            for i in range(MAX_HIGH_SCORES + 3):
+                add_high_score("NORMAL", 100 * (i + 1))
+            scores = get_high_scores("NORMAL")
+            assert len(scores) == MAX_HIGH_SCORES
+
+    def test_score_not_qualifying(self, temp_scores_file):
+        """Score too low to qualify returns 0."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            # Fill with high scores
+            for i in range(MAX_HIGH_SCORES):
+                add_high_score("NORMAL", 1000 - i * 10)
+            # Try to add a very low score
+            rank = add_high_score("NORMAL", 100)
+            assert rank == 0
+
+    def test_get_scores_for_difficulty(self, temp_scores_file):
+        """Should get scores for specific difficulty."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            add_high_score("EASY", 500)
+            add_high_score("NORMAL", 800)
+            easy_scores = get_high_scores("EASY")
+            normal_scores = get_high_scores("NORMAL")
+            assert easy_scores == [500]
+            assert normal_scores == [800]
+
+    def test_get_scores_nonexistent_difficulty(self, temp_scores_file):
+        """Getting scores for difficulty with no entries returns empty list."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            scores = get_high_scores("EXPERT")
+            assert scores == []
+
+    def test_scores_sorted_descending(self, temp_scores_file):
+        """Scores should be sorted highest first."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            add_high_score("NORMAL", 300)
+            add_high_score("NORMAL", 700)
+            add_high_score("NORMAL", 500)
+            scores = get_high_scores("NORMAL")
+            assert scores == [700, 500, 300]
+
+    def test_corrupt_file_handling(self, temp_scores_file):
+        """Should handle corrupt JSON file gracefully."""
+        with patch('main.HIGH_SCORE_FILE', temp_scores_file):
+            # Write invalid JSON
+            with open(temp_scores_file, 'w') as f:
+                f.write("not valid json {{{")
+            scores = load_high_scores()
+            assert scores == {}

@@ -22,6 +22,7 @@ python3 main.py
 | Arrow Left | Thrust left (decrease X velocity) |
 | Arrow Right | Thrust right (increase X velocity) |
 | R | Retro thrust (slow down) |
+| H | View high scores (from menu) |
 | Q | Quit |
 
 ## Objective
@@ -44,6 +45,10 @@ The simulation includes realistic space physics:
 - **Inertia**: Vehicle maintains velocity until thrust is applied
 - **Fuel**: Limited fuel supply - each thrust consumes fuel
 - **No friction**: Vehicle will drift forever without counter-thrust
+
+## High Scores
+
+The game saves your top 5 scores for each difficulty level to `~/.docking_highscores.json`. Scores are displayed on the difficulty selection menu and can be viewed in detail by pressing H.
 
 ## Running Tests
 

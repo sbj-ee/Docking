@@ -1,8 +1,11 @@
 import curses
+import json
+import os
 import time
 import sys
 from math import sqrt
 from dataclasses import dataclass
+from pathlib import Path
 
 
 # Default physics constants (used as base for difficulties)
@@ -25,6 +28,10 @@ COLOR_VEHICLE = 6
 SCORE_FUEL_MULTIPLIER = 10  # Points per unit of fuel remaining
 SCORE_SOFT_DOCK_BONUS = 200  # Bonus for very gentle docking
 SCORE_SOFT_DOCK_THRESHOLD = 0.2  # Speed threshold for soft dock bonus
+
+# High score file path (in user's home directory)
+HIGH_SCORE_FILE = Path.home() / ".docking_highscores.json"
+MAX_HIGH_SCORES = 5  # Number of high scores to keep per difficulty
 
 
 @dataclass
@@ -83,6 +90,52 @@ DIFFICULTIES = {
         score_multiplier=2.0,
     ),
 }
+
+
+def load_high_scores():
+    """Load high scores from file. Returns dict of difficulty -> list of scores."""
+    if not HIGH_SCORE_FILE.exists():
+        return {}
+    try:
+        with open(HIGH_SCORE_FILE, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def save_high_scores(scores):
+    """Save high scores to file."""
+    try:
+        with open(HIGH_SCORE_FILE, "w") as f:
+            json.dump(scores, f, indent=2)
+    except IOError:
+        pass  # Silently fail if we can't save
+
+
+def add_high_score(difficulty_name, score):
+    """Add a score to high scores if it qualifies. Returns rank (1-based) or 0 if not added."""
+    scores = load_high_scores()
+    if difficulty_name not in scores:
+        scores[difficulty_name] = []
+
+    high_list = scores[difficulty_name]
+
+    # Check if score qualifies
+    if len(high_list) < MAX_HIGH_SCORES or score > min(high_list):
+        high_list.append(score)
+        high_list.sort(reverse=True)
+        high_list = high_list[:MAX_HIGH_SCORES]
+        scores[difficulty_name] = high_list
+        save_high_scores(scores)
+        # Return the rank (1-based)
+        return high_list.index(score) + 1
+    return 0
+
+
+def get_high_scores(difficulty_name):
+    """Get high scores for a specific difficulty."""
+    scores = load_high_scores()
+    return scores.get(difficulty_name, [])
 
 
 def init_curses():
@@ -240,18 +293,65 @@ def show_difficulty_menu(stdscr):
         else:
             color = curses.color_pair(COLOR_DANGER)
 
+        # Get high score for this difficulty
+        high_scores = get_high_scores(diff.name)
+        best = high_scores[0] if high_scores else 0
+
         stdscr.addstr(6 + key, 10, f"{key}. {diff.name}", color)
         stdscr.addstr(f"  (Fuel: {diff.fuel:.0f}, Score: x{diff.score_multiplier})")
+        if best > 0:
+            stdscr.addstr(f"  Best: {best}", curses.color_pair(COLOR_SUCCESS))
 
-    stdscr.addstr(12, 10, "Press 1-4 to select, Q to quit")
+    stdscr.addstr(12, 10, "Press 1-4 to select, H for high scores, Q to quit")
     stdscr.refresh()
 
     while True:
         key = stdscr.getch()
         if key == ord("q") or key == ord("Q"):
             return None
+        if key == ord("h") or key == ord("H"):
+            show_high_scores(stdscr)
+            return show_difficulty_menu(stdscr)  # Return to menu after viewing
         if key in [ord("1"), ord("2"), ord("3"), ord("4")]:
             return DIFFICULTIES[int(chr(key))]
+
+
+def show_high_scores(stdscr):
+    """Display high scores screen."""
+    stdscr.clear()
+    stdscr.timeout(-1)
+
+    title_color = curses.color_pair(COLOR_TARGET) | curses.A_BOLD
+    stdscr.addstr(2, 10, "=== HIGH SCORES ===", title_color)
+
+    row = 4
+    for key, diff in DIFFICULTIES.items():
+        if diff.name == "EASY":
+            color = curses.color_pair(COLOR_SUCCESS)
+        elif diff.name == "NORMAL":
+            color = curses.color_pair(COLOR_NORMAL)
+        elif diff.name == "HARD":
+            color = curses.color_pair(COLOR_WARNING)
+        else:
+            color = curses.color_pair(COLOR_DANGER)
+
+        stdscr.addstr(row, 10, f"{diff.name}:", color | curses.A_BOLD)
+        row += 1
+
+        high_scores = get_high_scores(diff.name)
+        if high_scores:
+            for i, score in enumerate(high_scores, 1):
+                score_color = curses.color_pair(get_score_color(score))
+                stdscr.addstr(row, 12, f"{i}. {score}", score_color)
+                row += 1
+        else:
+            stdscr.addstr(row, 12, "No scores yet")
+            row += 1
+        row += 1
+
+    stdscr.addstr(row + 1, 10, "Press any key to return...")
+    stdscr.refresh()
+    stdscr.getch()
 
 
 def main(stdscr, difficulty=None):
@@ -350,6 +450,17 @@ def main(stdscr, difficulty=None):
                 stdscr.addstr(row, 0, f"TOTAL: {final_score}", score_color)
                 row += 1
                 stdscr.addstr(row, 0, f"Rating: {rating}", score_color)
+                row += 1
+
+                # Check and save high score
+                rank = add_high_score(difficulty.name, final_score)
+                if rank > 0:
+                    row += 1
+                    hs_color = curses.color_pair(COLOR_SUCCESS) | curses.A_BOLD | curses.A_BLINK
+                    if rank == 1:
+                        stdscr.addstr(row, 0, "*** NEW HIGH SCORE! ***", hs_color)
+                    else:
+                        stdscr.addstr(row, 0, f"*** NEW #{rank} SCORE! ***", hs_color)
             else:
                 fail_color = curses.color_pair(COLOR_DANGER) | curses.A_BOLD
                 stdscr.addstr(6, 0, "DOCKING FAILED: Too fast!", fail_color)
