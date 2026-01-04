@@ -8,12 +8,18 @@ from main import (
     get_fuel_color,
     get_speed_color,
     get_distance_color,
+    calculate_score,
+    get_score_rating,
+    get_score_color,
     THRUST_POWER,
     MAX_VELOCITY,
     INITIAL_FUEL,
     FUEL_PER_THRUST,
     DOCKING_THRESHOLD,
     DOCKING_MAX_VELOCITY,
+    SCORE_FUEL_MULTIPLIER,
+    SCORE_SOFT_DOCK_BONUS,
+    SCORE_SOFT_DOCK_THRESHOLD,
     COLOR_NORMAL,
     COLOR_SUCCESS,
     COLOR_WARNING,
@@ -229,3 +235,89 @@ class TestGetDistanceColor:
     def test_far_normal(self):
         """Far from target should return normal color."""
         assert get_distance_color(50) == COLOR_NORMAL
+
+
+class TestCalculateScore:
+    """Tests for calculate_score function."""
+
+    def test_full_fuel_soft_dock(self):
+        """Full fuel with soft dock should give maximum score."""
+        score = calculate_score(INITIAL_FUEL, 0.1)
+        expected = int(INITIAL_FUEL * SCORE_FUEL_MULTIPLIER) + SCORE_SOFT_DOCK_BONUS
+        assert score == expected
+
+    def test_full_fuel_no_soft_dock(self):
+        """Full fuel without soft dock bonus."""
+        score = calculate_score(INITIAL_FUEL, 0.4)
+        expected = int(INITIAL_FUEL * SCORE_FUEL_MULTIPLIER)
+        assert score == expected
+
+    def test_half_fuel_soft_dock(self):
+        """Half fuel with soft dock."""
+        score = calculate_score(50, 0.1)
+        expected = int(50 * SCORE_FUEL_MULTIPLIER) + SCORE_SOFT_DOCK_BONUS
+        assert score == expected
+
+    def test_empty_fuel(self):
+        """Empty fuel should give zero fuel score."""
+        score = calculate_score(0, 0.4)
+        assert score == 0
+
+    def test_soft_dock_threshold_boundary(self):
+        """Speed at threshold should get bonus."""
+        score_at = calculate_score(50, SCORE_SOFT_DOCK_THRESHOLD)
+        score_above = calculate_score(50, SCORE_SOFT_DOCK_THRESHOLD + 0.01)
+        assert score_at > score_above
+
+
+class TestGetScoreRating:
+    """Tests for get_score_rating function."""
+
+    def test_expert_rating(self):
+        """Score >= 1000 should be EXPERT."""
+        assert get_score_rating(1000) == "EXPERT"
+        assert get_score_rating(1200) == "EXPERT"
+
+    def test_excellent_rating(self):
+        """Score 800-999 should be EXCELLENT."""
+        assert get_score_rating(800) == "EXCELLENT"
+        assert get_score_rating(999) == "EXCELLENT"
+
+    def test_good_rating(self):
+        """Score 600-799 should be GOOD."""
+        assert get_score_rating(600) == "GOOD"
+        assert get_score_rating(799) == "GOOD"
+
+    def test_adequate_rating(self):
+        """Score 400-599 should be ADEQUATE."""
+        assert get_score_rating(400) == "ADEQUATE"
+        assert get_score_rating(599) == "ADEQUATE"
+
+    def test_poor_rating(self):
+        """Score 200-399 should be POOR."""
+        assert get_score_rating(200) == "POOR"
+        assert get_score_rating(399) == "POOR"
+
+    def test_novice_rating(self):
+        """Score < 200 should be NOVICE."""
+        assert get_score_rating(0) == "NOVICE"
+        assert get_score_rating(199) == "NOVICE"
+
+
+class TestGetScoreColor:
+    """Tests for get_score_color function."""
+
+    def test_high_score_green(self):
+        """High score should return success color."""
+        assert get_score_color(800) == COLOR_SUCCESS
+        assert get_score_color(1000) == COLOR_SUCCESS
+
+    def test_medium_score_yellow(self):
+        """Medium score should return warning color."""
+        assert get_score_color(400) == COLOR_WARNING
+        assert get_score_color(799) == COLOR_WARNING
+
+    def test_low_score_red(self):
+        """Low score should return danger color."""
+        assert get_score_color(0) == COLOR_DANGER
+        assert get_score_color(399) == COLOR_DANGER

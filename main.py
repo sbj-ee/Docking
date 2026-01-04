@@ -20,6 +20,11 @@ COLOR_DANGER = 4
 COLOR_TARGET = 5
 COLOR_VEHICLE = 6
 
+# Scoring constants
+SCORE_FUEL_MULTIPLIER = 10  # Points per unit of fuel remaining
+SCORE_SOFT_DOCK_BONUS = 200  # Bonus for very gentle docking
+SCORE_SOFT_DOCK_THRESHOLD = 0.2  # Speed threshold for soft dock bonus
+
 
 def init_curses():
     """Initialize curses and set up the screen."""
@@ -120,6 +125,43 @@ def apply_thrust(velocity, thrust, max_vel):
     return max(-max_vel, min(max_vel, new_velocity))
 
 
+def calculate_score(fuel, speed):
+    """Calculate final score based on fuel efficiency and docking speed."""
+    # Base score from fuel remaining
+    fuel_score = int(fuel * SCORE_FUEL_MULTIPLIER)
+
+    # Bonus for soft docking
+    soft_dock_bonus = SCORE_SOFT_DOCK_BONUS if speed <= SCORE_SOFT_DOCK_THRESHOLD else 0
+
+    return fuel_score + soft_dock_bonus
+
+
+def get_score_rating(score):
+    """Get a rating string based on score."""
+    if score >= 1000:
+        return "EXPERT"
+    elif score >= 800:
+        return "EXCELLENT"
+    elif score >= 600:
+        return "GOOD"
+    elif score >= 400:
+        return "ADEQUATE"
+    elif score >= 200:
+        return "POOR"
+    else:
+        return "NOVICE"
+
+
+def get_score_color(score):
+    """Get color based on score."""
+    if score >= 800:
+        return COLOR_SUCCESS
+    elif score >= 400:
+        return COLOR_WARNING
+    else:
+        return COLOR_DANGER
+
+
 def main(stdscr):
     # Get screen dimensions
     max_y, max_x = stdscr.getmaxyx()
@@ -172,14 +214,33 @@ def main(stdscr):
         # Check docking condition
         if distance < DOCKING_THRESHOLD:
             if speed <= DOCKING_MAX_VELOCITY:
+                # Calculate and display score
+                score = calculate_score(fuel, speed)
+                rating = get_score_rating(score)
+                score_color = curses.color_pair(get_score_color(score)) | curses.A_BOLD
+
                 success_color = curses.color_pair(COLOR_SUCCESS) | curses.A_BOLD
                 stdscr.addstr(5, 0, "DOCKING SUCCESSFUL!", success_color)
-                stdscr.addstr(6, 0, f"Fuel remaining: {fuel:.1f}", success_color)
+                stdscr.addstr(6, 0, f"Fuel remaining: {fuel:.1f}")
+
+                # Show score breakdown
+                stdscr.addstr(8, 0, "=== SCORE ===")
+                stdscr.addstr(9, 0, f"Fuel bonus:      {int(fuel * SCORE_FUEL_MULTIPLIER)}")
+                if speed <= SCORE_SOFT_DOCK_THRESHOLD:
+                    stdscr.addstr(10, 0, f"Soft dock bonus: {SCORE_SOFT_DOCK_BONUS}")
+                    stdscr.addstr(11, 0, "-" * 20)
+                    stdscr.addstr(12, 0, f"TOTAL: {score}", score_color)
+                    stdscr.addstr(13, 0, f"Rating: {rating}", score_color)
+                else:
+                    stdscr.addstr(10, 0, "-" * 20)
+                    stdscr.addstr(11, 0, f"TOTAL: {score}", score_color)
+                    stdscr.addstr(12, 0, f"Rating: {rating}", score_color)
             else:
                 fail_color = curses.color_pair(COLOR_DANGER) | curses.A_BOLD
                 stdscr.addstr(5, 0, "DOCKING FAILED: Too fast!", fail_color)
+                stdscr.addstr(6, 0, "Score: 0", fail_color)
             stdscr.refresh()
-            time.sleep(2)
+            time.sleep(3)
             break
 
         # Check for out of fuel
