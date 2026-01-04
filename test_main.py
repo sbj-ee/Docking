@@ -11,6 +11,8 @@ from main import (
     calculate_score,
     get_score_rating,
     get_score_color,
+    Difficulty,
+    DIFFICULTIES,
     THRUST_POWER,
     MAX_VELOCITY,
     INITIAL_FUEL,
@@ -321,3 +323,60 @@ class TestGetScoreColor:
         """Low score should return danger color."""
         assert get_score_color(0) == COLOR_DANGER
         assert get_score_color(399) == COLOR_DANGER
+
+
+class TestDifficulty:
+    """Tests for Difficulty class and presets."""
+
+    def test_four_difficulties_exist(self):
+        """Should have 4 difficulty levels."""
+        assert len(DIFFICULTIES) == 4
+
+    def test_difficulty_keys(self):
+        """Difficulty keys should be 1-4."""
+        assert set(DIFFICULTIES.keys()) == {1, 2, 3, 4}
+
+    def test_easy_has_most_fuel(self):
+        """Easy should have the most fuel."""
+        easy = DIFFICULTIES[1]
+        for key, diff in DIFFICULTIES.items():
+            if key != 1:
+                assert easy.fuel >= diff.fuel
+
+    def test_expert_has_least_fuel(self):
+        """Expert should have the least fuel."""
+        expert = DIFFICULTIES[4]
+        for key, diff in DIFFICULTIES.items():
+            if key != 4:
+                assert expert.fuel <= diff.fuel
+
+    def test_score_multiplier_increases(self):
+        """Score multiplier should increase with difficulty."""
+        assert DIFFICULTIES[1].score_multiplier < DIFFICULTIES[2].score_multiplier
+        assert DIFFICULTIES[2].score_multiplier < DIFFICULTIES[3].score_multiplier
+        assert DIFFICULTIES[3].score_multiplier < DIFFICULTIES[4].score_multiplier
+
+    def test_docking_threshold_decreases(self):
+        """Docking threshold should decrease with difficulty."""
+        assert DIFFICULTIES[1].docking_threshold > DIFFICULTIES[2].docking_threshold
+        assert DIFFICULTIES[2].docking_threshold > DIFFICULTIES[3].docking_threshold
+        assert DIFFICULTIES[3].docking_threshold > DIFFICULTIES[4].docking_threshold
+
+    def test_difficulty_names(self):
+        """Each difficulty should have a name."""
+        assert DIFFICULTIES[1].name == "EASY"
+        assert DIFFICULTIES[2].name == "NORMAL"
+        assert DIFFICULTIES[3].name == "HARD"
+        assert DIFFICULTIES[4].name == "EXPERT"
+
+    def test_difficulty_has_all_fields(self):
+        """Each difficulty should have all required fields."""
+        for diff in DIFFICULTIES.values():
+            assert hasattr(diff, 'name')
+            assert hasattr(diff, 'fuel')
+            assert hasattr(diff, 'thrust_power')
+            assert hasattr(diff, 'fuel_per_thrust')
+            assert hasattr(diff, 'docking_threshold')
+            assert hasattr(diff, 'docking_max_velocity')
+            assert hasattr(diff, 'start_distance_factor')
+            assert hasattr(diff, 'score_multiplier')
