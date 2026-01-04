@@ -17,15 +17,37 @@ python3 main.py
 
 | Key | Action |
 |-----|--------|
-| Arrow Up | Decrease Y velocity (move up) |
-| Arrow Down | Increase Y velocity (move down) |
-| Arrow Left | Decrease X velocity (move left) |
-| Arrow Right | Increase X velocity (move right) |
-| Space | Stop (zero velocity) |
+| Arrow Up | Thrust up (decrease Y velocity) |
+| Arrow Down | Thrust down (increase Y velocity) |
+| Arrow Left | Thrust left (decrease X velocity) |
+| Arrow Right | Thrust right (increase X velocity) |
+| R | Retro thrust (slow down) |
 | Q | Quit |
 
 ## Objective
 
-Navigate the vehicle `V` to dock with the target `O`. The docking is successful when the vehicle is within the threshold distance of the target.
+Navigate the vehicle `V` to dock with the target `O`.
 
-Avoid colliding with the screen boundaries.
+### Success Conditions
+- Be within docking threshold distance of target
+- Approach speed must be below safe docking velocity
+
+### Failure Conditions
+- Collide with screen boundaries
+- Approach target too fast
+- Run out of fuel
+
+## Physics
+
+The simulation includes realistic space physics:
+
+- **Inertia**: Vehicle maintains velocity until thrust is applied
+- **Fuel**: Limited fuel supply - each thrust consumes fuel
+- **No friction**: Vehicle will drift forever without counter-thrust
+
+## Running Tests
+
+```bash
+pip install pytest
+pytest test_main.py -v
+```

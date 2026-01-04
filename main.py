@@ -4,6 +4,15 @@ import sys
 from math import sqrt
 
 
+# Physics constants
+THRUST_POWER = 0.05  # Acceleration per thrust
+MAX_VELOCITY = 2.0  # Maximum velocity in any direction
+FUEL_PER_THRUST = 1.0  # Fuel consumed per thrust
+INITIAL_FUEL = 100.0  # Starting fuel
+DOCKING_THRESHOLD = 2.0  # Distance to dock successfully
+DOCKING_MAX_VELOCITY = 0.5  # Max velocity for safe docking
+
+
 def init_curses():
     """Initialize curses and set up the screen."""
     stdscr = curses.initscr()
@@ -23,7 +32,16 @@ def draw_target(stdscr, target_x, target_y):
 
 def draw_vehicle(stdscr, vehicle_x, vehicle_y):
     """Draw the approaching vehicle."""
-    stdscr.addstr(vehicle_y, vehicle_x, "V")
+    stdscr.addstr(int(vehicle_y), int(vehicle_x), "V")
+
+
+def draw_fuel_gauge(stdscr, fuel, max_fuel, row):
+    """Draw a fuel gauge bar."""
+    gauge_width = 20
+    filled = int((fuel / max_fuel) * gauge_width)
+    empty = gauge_width - filled
+    gauge = "[" + "#" * filled + "-" * empty + "]"
+    stdscr.addstr(row, 0, f"Fuel: {gauge} {fuel:.1f}")
 
 
 def calculate_distance(vehicle_x, vehicle_y, target_x, target_y):
@@ -31,18 +49,28 @@ def calculate_distance(vehicle_x, vehicle_y, target_x, target_y):
     return sqrt((vehicle_x - target_x) ** 2 + (vehicle_y - target_y) ** 2)
 
 
+def calculate_speed(velocity_x, velocity_y):
+    """Calculate total speed from velocity components."""
+    return sqrt(velocity_x ** 2 + velocity_y ** 2)
+
+
+def apply_thrust(velocity, thrust, max_vel):
+    """Apply thrust to velocity, respecting max velocity."""
+    new_velocity = velocity + thrust
+    return max(-max_vel, min(max_vel, new_velocity))
+
+
 def main(stdscr):
     # Get screen dimensions
     max_y, max_x = stdscr.getmaxyx()
 
-    # Initial positions
+    # Initial positions (use floats for smooth movement)
     target_x, target_y = max_x // 2, max_y // 2
-    vehicle_x, vehicle_y = max_x // 4, max_y // 4
-    velocity_x, velocity_y = 0, 0
+    vehicle_x, vehicle_y = float(max_x // 4), float(max_y // 4)
+    velocity_x, velocity_y = 0.0, 0.0
 
-    # Control parameters
-    max_velocity = 1.0
-    docking_threshold = 2.0
+    # Fuel
+    fuel = INITIAL_FUEL
 
     stdscr.timeout(100)  # Non-blocking input with 100ms timeout
 
@@ -55,16 +83,30 @@ def main(stdscr):
 
         # Display status
         distance = calculate_distance(vehicle_x, vehicle_y, target_x, target_y)
-        stdscr.addstr(0, 0, f"Distance to target: {distance:.2f}")
-        stdscr.addstr(1, 0, f"Velocity X: {velocity_x:.2f}, Y: {velocity_y:.2f}")
-        stdscr.addstr(2, 0, "Controls: Arrows (move), Space (stop), Q (quit)")
+        speed = calculate_speed(velocity_x, velocity_y)
+        stdscr.addstr(0, 0, f"Distance: {distance:.1f}  Speed: {speed:.2f}")
+        stdscr.addstr(1, 0, f"Velocity X: {velocity_x:+.2f}  Y: {velocity_y:+.2f}")
+        draw_fuel_gauge(stdscr, fuel, INITIAL_FUEL, 2)
+        stdscr.addstr(3, 0, "Controls: Arrows (thrust), R (retro), Q (quit)")
+
+        # Warning if approaching too fast
+        if distance < 10 and speed > DOCKING_MAX_VELOCITY:
+            stdscr.addstr(4, 0, "WARNING: Reduce speed for docking!")
 
         # Check docking condition
-        if distance < docking_threshold:
-            stdscr.addstr(4, 0, "DOCKING SUCCESSFUL!")
+        if distance < DOCKING_THRESHOLD:
+            if speed <= DOCKING_MAX_VELOCITY:
+                stdscr.addstr(5, 0, "DOCKING SUCCESSFUL!")
+                stdscr.addstr(6, 0, f"Fuel remaining: {fuel:.1f}")
+            else:
+                stdscr.addstr(5, 0, "DOCKING FAILED: Too fast!")
             stdscr.refresh()
             time.sleep(2)
             break
+
+        # Check for out of fuel
+        if fuel <= 0:
+            stdscr.addstr(4, 0, "OUT OF FUEL - Drifting...")
 
         # Handle input
         try:
@@ -72,23 +114,52 @@ def main(stdscr):
         except:
             key = -1
 
-        # Process controls
-        if key == curses.KEY_UP:
-            velocity_y = max(-max_velocity, velocity_y - 0.1)
-        elif key == curses.KEY_DOWN:
-            velocity_y = min(max_velocity, velocity_y + 0.1)
-        elif key == curses.KEY_LEFT:
-            velocity_x = max(-max_velocity, velocity_x - 0.1)
-        elif key == curses.KEY_RIGHT:
-            velocity_x = min(max_velocity, velocity_x + 0.1)
-        elif key == ord(" "):
-            velocity_x, velocity_y = 0, 0
-        elif key == ord("q") or key == ord("Q"):
+        # Process controls (only if fuel available)
+        thrust_used = False
+        if fuel > 0:
+            if key == curses.KEY_UP:
+                velocity_y = apply_thrust(velocity_y, -THRUST_POWER, MAX_VELOCITY)
+                thrust_used = True
+            elif key == curses.KEY_DOWN:
+                velocity_y = apply_thrust(velocity_y, THRUST_POWER, MAX_VELOCITY)
+                thrust_used = True
+            elif key == curses.KEY_LEFT:
+                velocity_x = apply_thrust(velocity_x, -THRUST_POWER, MAX_VELOCITY)
+                thrust_used = True
+            elif key == curses.KEY_RIGHT:
+                velocity_x = apply_thrust(velocity_x, THRUST_POWER, MAX_VELOCITY)
+                thrust_used = True
+            elif key == ord("r") or key == ord("R"):
+                # Retro thrust - slow down in both axes
+                if abs(velocity_x) > THRUST_POWER:
+                    velocity_x = apply_thrust(
+                        velocity_x,
+                        THRUST_POWER if velocity_x < 0 else -THRUST_POWER,
+                        MAX_VELOCITY,
+                    )
+                    thrust_used = True
+                else:
+                    velocity_x = 0
+                if abs(velocity_y) > THRUST_POWER:
+                    velocity_y = apply_thrust(
+                        velocity_y,
+                        THRUST_POWER if velocity_y < 0 else -THRUST_POWER,
+                        MAX_VELOCITY,
+                    )
+                    thrust_used = True
+                else:
+                    velocity_y = 0
+
+        if key == ord("q") or key == ord("Q"):
             break
 
-        # Update vehicle position
-        vehicle_x = max(0, min(max_x - 1, vehicle_x + velocity_x))
-        vehicle_y = max(0, min(max_y - 1, vehicle_y + velocity_y))
+        # Consume fuel
+        if thrust_used:
+            fuel = max(0, fuel - FUEL_PER_THRUST)
+
+        # Update vehicle position (inertia - keeps moving)
+        vehicle_x += velocity_x
+        vehicle_y += velocity_y
 
         # Check for collision with boundaries
         if (
@@ -97,7 +168,7 @@ def main(stdscr):
             or vehicle_y <= 0
             or vehicle_y >= max_y - 1
         ):
-            stdscr.addstr(4, 0, "COLLISION DETECTED!")
+            stdscr.addstr(5, 0, "COLLISION DETECTED!")
             stdscr.refresh()
             time.sleep(2)
             break

@@ -1,8 +1,17 @@
 """Tests for the Docking app."""
 
 import pytest
-from unittest.mock import MagicMock, patch
-from main import calculate_distance
+from main import (
+    calculate_distance,
+    calculate_speed,
+    apply_thrust,
+    THRUST_POWER,
+    MAX_VELOCITY,
+    INITIAL_FUEL,
+    FUEL_PER_THRUST,
+    DOCKING_THRESHOLD,
+    DOCKING_MAX_VELOCITY,
+)
 
 
 class TestCalculateDistance:
@@ -35,60 +44,125 @@ class TestCalculateDistance:
         assert d1 == d2
 
 
+class TestCalculateSpeed:
+    """Tests for the calculate_speed function."""
+
+    def test_zero_velocity(self):
+        """Speed should be 0 when not moving."""
+        assert calculate_speed(0, 0) == 0
+
+    def test_horizontal_only(self):
+        """Speed with only horizontal velocity."""
+        assert calculate_speed(5, 0) == 5.0
+
+    def test_vertical_only(self):
+        """Speed with only vertical velocity."""
+        assert calculate_speed(0, 3) == 3.0
+
+    def test_diagonal_velocity(self):
+        """Speed with diagonal velocity (3-4-5 triangle)."""
+        assert calculate_speed(3, 4) == 5.0
+
+    def test_negative_velocity(self):
+        """Speed should be positive regardless of direction."""
+        assert calculate_speed(-3, -4) == 5.0
+
+
+class TestApplyThrust:
+    """Tests for the apply_thrust function."""
+
+    def test_positive_thrust(self):
+        """Applying positive thrust increases velocity."""
+        result = apply_thrust(0, 0.1, MAX_VELOCITY)
+        assert result == 0.1
+
+    def test_negative_thrust(self):
+        """Applying negative thrust decreases velocity."""
+        result = apply_thrust(0, -0.1, MAX_VELOCITY)
+        assert result == -0.1
+
+    def test_max_velocity_clamp(self):
+        """Velocity should not exceed max."""
+        result = apply_thrust(MAX_VELOCITY, 0.5, MAX_VELOCITY)
+        assert result == MAX_VELOCITY
+
+    def test_min_velocity_clamp(self):
+        """Velocity should not go below negative max."""
+        result = apply_thrust(-MAX_VELOCITY, -0.5, MAX_VELOCITY)
+        assert result == -MAX_VELOCITY
+
+    def test_thrust_accumulation(self):
+        """Multiple thrusts should accumulate."""
+        velocity = 0
+        velocity = apply_thrust(velocity, THRUST_POWER, MAX_VELOCITY)
+        velocity = apply_thrust(velocity, THRUST_POWER, MAX_VELOCITY)
+        assert velocity == 2 * THRUST_POWER
+
+
 class TestDockingThreshold:
     """Tests for docking threshold logic."""
 
     def test_within_threshold(self):
         """Vehicle within threshold should dock successfully."""
-        docking_threshold = 2.0
         distance = calculate_distance(10, 10, 11, 10)
-        assert distance < docking_threshold
+        assert distance < DOCKING_THRESHOLD
 
     def test_outside_threshold(self):
         """Vehicle outside threshold should not dock."""
-        docking_threshold = 2.0
         distance = calculate_distance(10, 10, 15, 15)
-        assert distance >= docking_threshold
+        assert distance >= DOCKING_THRESHOLD
 
 
-class TestVelocityBounds:
-    """Tests for velocity clamping logic."""
+class TestDockingVelocity:
+    """Tests for safe docking velocity."""
 
-    def test_velocity_clamp_max(self):
-        """Velocity should not exceed max."""
-        max_velocity = 1.0
-        velocity = 0.5
-        velocity = min(max_velocity, velocity + 0.1)
-        assert velocity <= max_velocity
+    def test_safe_docking_speed(self):
+        """Speed below threshold should allow docking."""
+        speed = calculate_speed(0.3, 0.3)
+        assert speed <= DOCKING_MAX_VELOCITY
 
-    def test_velocity_clamp_min(self):
-        """Velocity should not go below negative max."""
-        max_velocity = 1.0
-        velocity = -0.5
-        velocity = max(-max_velocity, velocity - 0.1)
-        assert velocity >= -max_velocity
+    def test_unsafe_docking_speed(self):
+        """Speed above threshold should fail docking."""
+        speed = calculate_speed(1.0, 1.0)
+        assert speed > DOCKING_MAX_VELOCITY
 
 
-class TestPositionBounds:
-    """Tests for position boundary logic."""
+class TestFuelConsumption:
+    """Tests for fuel consumption logic."""
 
-    def test_position_clamp_min(self):
-        """Position should not go below 0."""
-        max_x = 80
-        position_x = -5
-        position_x = max(0, min(max_x - 1, position_x))
-        assert position_x == 0
+    def test_initial_fuel(self):
+        """Initial fuel should be set correctly."""
+        assert INITIAL_FUEL == 100.0
 
-    def test_position_clamp_max(self):
-        """Position should not exceed screen bounds."""
-        max_x = 80
-        position_x = 100
-        position_x = max(0, min(max_x - 1, position_x))
-        assert position_x == max_x - 1
+    def test_fuel_consumption_rate(self):
+        """Fuel consumption per thrust should be defined."""
+        assert FUEL_PER_THRUST > 0
 
-    def test_position_within_bounds(self):
-        """Position within bounds should remain unchanged."""
-        max_x = 80
-        position_x = 40
-        result = max(0, min(max_x - 1, position_x))
-        assert result == 40
+    def test_fuel_depletion(self):
+        """Fuel should deplete with thrusts."""
+        fuel = INITIAL_FUEL
+        thrusts = 10
+        fuel -= thrusts * FUEL_PER_THRUST
+        assert fuel == INITIAL_FUEL - (thrusts * FUEL_PER_THRUST)
+
+    def test_fuel_cannot_go_negative(self):
+        """Fuel should not go below zero."""
+        fuel = 5.0
+        fuel = max(0, fuel - 10 * FUEL_PER_THRUST)
+        assert fuel == 0
+
+
+class TestPhysicsConstants:
+    """Tests for physics constants."""
+
+    def test_thrust_power_reasonable(self):
+        """Thrust power should be small for gradual acceleration."""
+        assert 0 < THRUST_POWER < 1
+
+    def test_max_velocity_reasonable(self):
+        """Max velocity should allow gameplay."""
+        assert MAX_VELOCITY > 0
+
+    def test_docking_max_velocity_less_than_max(self):
+        """Safe docking speed should be less than max velocity."""
+        assert DOCKING_MAX_VELOCITY < MAX_VELOCITY
