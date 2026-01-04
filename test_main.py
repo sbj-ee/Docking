@@ -5,12 +5,19 @@ from main import (
     calculate_distance,
     calculate_speed,
     apply_thrust,
+    get_fuel_color,
+    get_speed_color,
+    get_distance_color,
     THRUST_POWER,
     MAX_VELOCITY,
     INITIAL_FUEL,
     FUEL_PER_THRUST,
     DOCKING_THRESHOLD,
     DOCKING_MAX_VELOCITY,
+    COLOR_NORMAL,
+    COLOR_SUCCESS,
+    COLOR_WARNING,
+    COLOR_DANGER,
 )
 
 
@@ -166,3 +173,59 @@ class TestPhysicsConstants:
     def test_docking_max_velocity_less_than_max(self):
         """Safe docking speed should be less than max velocity."""
         assert DOCKING_MAX_VELOCITY < MAX_VELOCITY
+
+
+class TestGetFuelColor:
+    """Tests for get_fuel_color function."""
+
+    def test_high_fuel_green(self):
+        """High fuel (>50%) should return success color."""
+        assert get_fuel_color(75, 100) == COLOR_SUCCESS
+
+    def test_medium_fuel_yellow(self):
+        """Medium fuel (20-50%) should return warning color."""
+        assert get_fuel_color(35, 100) == COLOR_WARNING
+
+    def test_low_fuel_red(self):
+        """Low fuel (<20%) should return danger color."""
+        assert get_fuel_color(10, 100) == COLOR_DANGER
+
+    def test_empty_fuel_red(self):
+        """Empty fuel should return danger color."""
+        assert get_fuel_color(0, 100) == COLOR_DANGER
+
+
+class TestGetSpeedColor:
+    """Tests for get_speed_color function."""
+
+    def test_far_away_normal(self):
+        """Speed color should be normal when far from target."""
+        assert get_speed_color(1.0, 50) == COLOR_NORMAL
+
+    def test_close_slow_green(self):
+        """Close and slow should return success color."""
+        assert get_speed_color(0.3, 5) == COLOR_SUCCESS
+
+    def test_close_medium_yellow(self):
+        """Close and medium speed should return warning color."""
+        assert get_speed_color(0.7, 5) == COLOR_WARNING
+
+    def test_close_fast_red(self):
+        """Close and fast should return danger color."""
+        assert get_speed_color(2.0, 5) == COLOR_DANGER
+
+
+class TestGetDistanceColor:
+    """Tests for get_distance_color function."""
+
+    def test_docking_range_green(self):
+        """Within docking threshold should return success color."""
+        assert get_distance_color(1.5) == COLOR_SUCCESS
+
+    def test_approach_range_yellow(self):
+        """Within approach range should return warning color."""
+        assert get_distance_color(5) == COLOR_WARNING
+
+    def test_far_normal(self):
+        """Far from target should return normal color."""
+        assert get_distance_color(50) == COLOR_NORMAL
