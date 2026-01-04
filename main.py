@@ -1,16 +1,16 @@
-import ncurses
+import curses
 import time
 import sys
 from math import sqrt
 
 
-def init_ncurses():
-    """Initialize ncurses and set up the screen."""
-    stdscr = ncurses.initscr()
-    ncurses.cbreak()
-    ncurses.noecho()
+def init_curses():
+    """Initialize curses and set up the screen."""
+    stdscr = curses.initscr()
+    curses.cbreak()
+    curses.noecho()
     stdscr.keypad(True)
-    ncurses.curs_set(0)  # Hide cursor
+    curses.curs_set(0)  # Hide cursor
     return stdscr
 
 
@@ -73,13 +73,13 @@ def main(stdscr):
             key = -1
 
         # Process controls
-        if key == ncurses.KEY_UP:
+        if key == curses.KEY_UP:
             velocity_y = max(-max_velocity, velocity_y - 0.1)
-        elif key == ncurses.KEY_DOWN:
+        elif key == curses.KEY_DOWN:
             velocity_y = min(max_velocity, velocity_y + 0.1)
-        elif key == ncurses.KEY_LEFT:
+        elif key == curses.KEY_LEFT:
             velocity_x = max(-max_velocity, velocity_x - 0.1)
-        elif key == ncurses.KEY_RIGHT:
+        elif key == curses.KEY_RIGHT:
             velocity_x = min(max_velocity, velocity_x + 0.1)
         elif key == ord(" "):
             velocity_x, velocity_y = 0, 0
@@ -110,11 +110,11 @@ def main(stdscr):
 
 if __name__ == "__main__":
     try:
-        stdscr = init_ncurses()
+        stdscr = init_curses()
         main(stdscr)
     finally:
-        # Clean up ncurses
-        ncurses.cbreak()
+        # Clean up curses
+        curses.cbreak()
         stdscr.keypad(False)
-        ncurses.echo()
-        ncurses.endwin()
+        curses.echo()
+        curses.endwin()
