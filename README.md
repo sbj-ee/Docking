@@ -6,6 +6,7 @@ A terminal-based spacecraft docking simulator using Python curses.
 
 - Python 3.x
 - curses (included in Python standard library)
+- Terminal with Unicode support
 
 ## Usage
 
@@ -23,11 +24,21 @@ python3 main.py
 | Arrow Right | Thrust right (increase X velocity) |
 | R | Retro thrust (slow down) |
 | H | View high scores (from menu) |
+| Y/N | Play again prompt |
 | Q | Quit |
 
 ## Objective
 
-Navigate the vehicle `V` to dock with the target `O`.
+Navigate your spacecraft to dock with the station port.
+
+```
+  ╔═══╗            ▲
+  ║   ║           ◄█►
+══╣ ◎ ╠══          ▼
+  ║   ║        Spacecraft
+  ╚═══╝
+Docking Port
+```
 
 ### Success Conditions
 - Be within docking threshold distance of target
@@ -45,6 +56,14 @@ The simulation includes realistic space physics:
 - **Inertia**: Vehicle maintains velocity until thrust is applied
 - **Fuel**: Limited fuel supply - each thrust consumes fuel
 - **No friction**: Vehicle will drift forever without counter-thrust
+
+## Visual Features
+
+- **Twinkling starfield**: Animated background with varying star brightness
+- **Thrust flames**: Visual feedback when firing thrusters
+- **Docking animation**: Clamp engagement sequence on successful dock
+- **Explosion effects**: Animated debris on crash or failed docking
+- **Color-coded HUD**: Fuel, speed, and distance indicators change color based on status
 
 ## High Scores
 
