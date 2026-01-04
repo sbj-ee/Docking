@@ -1,6 +1,7 @@
 import curses
 import json
 import os
+import random
 import time
 import sys
 from math import sqrt
@@ -23,6 +24,7 @@ COLOR_WARNING = 3
 COLOR_DANGER = 4
 COLOR_TARGET = 5
 COLOR_VEHICLE = 6
+COLOR_STAR = 7
 
 # Scoring constants
 SCORE_FUEL_MULTIPLIER = 10  # Points per unit of fuel remaining
@@ -156,8 +158,54 @@ def init_curses():
         curses.init_pair(COLOR_DANGER, curses.COLOR_RED, -1)
         curses.init_pair(COLOR_TARGET, curses.COLOR_CYAN, -1)
         curses.init_pair(COLOR_VEHICLE, curses.COLOR_MAGENTA, -1)
+        curses.init_pair(COLOR_STAR, curses.COLOR_WHITE, -1)
 
     return stdscr
+
+
+def generate_starfield(max_x, max_y, density=0.02):
+    """Generate random star positions for the background.
+
+    Returns list of (x, y, char, base_bright, twinkle_rate) tuples.
+    twinkle_rate: 0.0 = static, 1.0 = maximum twinkle
+    """
+    stars = []
+    num_stars = int(max_x * max_y * density)
+    star_chars = ['.', '.', '.', '*', '+', '·']  # Weighted toward dim stars
+
+    for _ in range(num_stars):
+        x = random.randint(0, max_x - 1)
+        y = random.randint(6, max_y - 1)  # Leave room for HUD at top
+        char = random.choice(star_chars)
+        base_bright = random.random() > 0.7  # 30% chance of bright star
+        # Brighter stars and special chars twinkle more
+        twinkle_rate = random.random() * 0.4 if char in ['*', '+'] else random.random() * 0.15
+        stars.append((x, y, char, base_bright, twinkle_rate))
+
+    return stars
+
+
+def draw_starfield(stdscr, stars):
+    """Draw the starfield background with twinkling animation."""
+    dim = curses.color_pair(COLOR_STAR) | curses.A_DIM
+    bright = curses.color_pair(COLOR_STAR)
+    very_bright = curses.color_pair(COLOR_STAR) | curses.A_BOLD
+
+    for x, y, char, base_bright, twinkle_rate in stars:
+        try:
+            # Randomly vary brightness based on twinkle rate
+            if twinkle_rate > 0 and random.random() < twinkle_rate:
+                # Twinkle: flip brightness state
+                if base_bright:
+                    attr = very_bright if random.random() > 0.5 else dim
+                else:
+                    attr = bright if random.random() > 0.3 else dim
+            else:
+                # Normal state
+                attr = bright if base_bright else dim
+            stdscr.addstr(y, x, char, attr)
+        except curses.error:
+            pass  # Ignore if star is off-screen
 
 
 def get_fuel_color(fuel, max_fuel):
@@ -194,17 +242,243 @@ def get_distance_color(distance):
 
 
 def draw_target(stdscr, target_x, target_y):
-    """Draw the docking target."""
+    """Draw the docking target as a docking port."""
     color = curses.color_pair(COLOR_TARGET)
-    stdscr.addstr(target_y - 1, target_x - 2, "  +  ", color)
-    stdscr.addstr(target_y, target_x - 2, "<- O ->", color)
-    stdscr.addstr(target_y + 1, target_x - 2, "  +  ", color)
+    bold = curses.color_pair(COLOR_TARGET) | curses.A_BOLD
+    stdscr.addstr(target_y - 2, target_x - 4, "  ╔═══╗  ", color)
+    stdscr.addstr(target_y - 1, target_x - 4, "  ║   ║  ", color)
+    stdscr.addstr(target_y,     target_x - 4, "══╣ ◎ ╠══", bold)
+    stdscr.addstr(target_y + 1, target_x - 4, "  ║   ║  ", color)
+    stdscr.addstr(target_y + 2, target_x - 4, "  ╚═══╝  ", color)
 
 
-def draw_vehicle(stdscr, vehicle_x, vehicle_y):
-    """Draw the approaching vehicle."""
+def draw_vehicle(stdscr, vehicle_x, vehicle_y, thrust=None):
+    """Draw the approaching vehicle as a spacecraft with optional thrust flames.
+
+    thrust: dict with keys 'up', 'down', 'left', 'right' indicating active thrusters
+    """
+    if thrust is None:
+        thrust = {}
     color = curses.color_pair(COLOR_VEHICLE) | curses.A_BOLD
-    stdscr.addstr(int(vehicle_y), int(vehicle_x), "V", color)
+    flame = curses.color_pair(COLOR_WARNING) | curses.A_BOLD
+    x, y = int(vehicle_x), int(vehicle_y)
+
+    # Top row - thruster fires DOWN when moving UP
+    if thrust.get('up'):
+        stdscr.addstr(y - 1, x - 1, " ▲ ", color)
+        stdscr.addstr(y + 2, x - 1, " ╽ ", flame)  # Flame below
+    else:
+        stdscr.addstr(y - 1, x - 1, " ▲ ", color)
+
+    # Middle row with left/right thrusters
+    left_flame = "╼" if thrust.get('right') else ""
+    right_flame = "╾" if thrust.get('left') else ""
+    stdscr.addstr(y, x - 1, "◄█►", color)
+    if thrust.get('right'):
+        stdscr.addstr(y, x - 2, "╼", flame)  # Flame left
+    if thrust.get('left'):
+        stdscr.addstr(y, x + 2, "╾", flame)  # Flame right
+
+    # Bottom row - thruster fires UP when moving DOWN
+    if thrust.get('down'):
+        stdscr.addstr(y - 2, x - 1, " ╿ ", flame)  # Flame above
+        stdscr.addstr(y + 1, x - 1, " ▼ ", color)
+    else:
+        stdscr.addstr(y + 1, x - 1, " ▼ ", color)
+
+
+def draw_explosion(stdscr, x, y, max_x, max_y, stars=None):
+    """Draw an animated explosion at the given position."""
+    x, y = int(x), int(y)
+    danger = curses.color_pair(COLOR_DANGER) | curses.A_BOLD
+    warning = curses.color_pair(COLOR_WARNING) | curses.A_BOLD
+    dim = curses.color_pair(COLOR_DANGER) | curses.A_DIM
+
+    # Explosion frames - each is a list of (dx, dy, char) offsets from center
+    frames = [
+        # Frame 1: Initial flash
+        [(0, 0, '█'), (0, -1, '▀'), (0, 1, '▄'), (-1, 0, '▌'), (1, 0, '▐')],
+        # Frame 2: Expanding
+        [(0, 0, '*'), (-1, -1, '\\'), (1, -1, '/'), (-1, 1, '/'), (1, 1, '\\'),
+         (0, -1, '|'), (0, 1, '|'), (-2, 0, '-'), (2, 0, '-')],
+        # Frame 3: Larger expansion
+        [(0, 0, '·'), (-2, -2, '`'), (2, -2, '´'), (-2, 2, ','), (2, 2, '.'),
+         (-1, -2, '*'), (1, -2, '*'), (-1, 2, '*'), (1, 2, '*'),
+         (-3, 0, '~'), (3, 0, '~'), (0, -2, '°'), (0, 2, '°')],
+        # Frame 4: Debris flying outward
+        [(0, 0, ' '), (-3, -3, '.'), (3, -3, '.'), (-3, 3, '.'), (3, 3, '.'),
+         (-4, -1, '·'), (4, -1, '·'), (-4, 1, '·'), (4, 1, '·'),
+         (-2, -3, '*'), (2, -3, '*'), (-2, 3, '*'), (2, 3, '*'),
+         (0, -3, '|'), (0, 3, '|'), (-4, 0, '-'), (4, 0, '-')],
+        # Frame 5: Fading debris
+        [(0, 0, ' '), (-4, -4, '.'), (4, -4, '.'), (-4, 4, '.'), (4, 4, '.'),
+         (-5, -2, '·'), (5, -2, '·'), (-5, 2, '·'), (5, 2, '·'),
+         (0, -4, '·'), (0, 4, '·'), (-5, 0, '·'), (5, 0, '·')],
+        # Frame 6: Sparse remnants
+        [(-5, -5, '.'), (5, -5, '.'), (-5, 5, '.'), (5, 5, '.'),
+         (-6, 0, '·'), (6, 0, '·'), (0, -5, '·'), (0, 5, '·')],
+    ]
+
+    frame_colors = [danger, warning, warning, danger, dim, dim]
+    frame_delays = [0.08, 0.1, 0.1, 0.12, 0.15, 0.2]
+
+    for frame_idx, frame in enumerate(frames):
+        stdscr.clear()
+
+        # Draw starfield if provided
+        if stars:
+            draw_starfield(stdscr, stars)
+
+        color = frame_colors[frame_idx]
+
+        for dx, dy, char in frame:
+            px, py = x + dx, y + dy
+            # Keep within screen bounds
+            if 0 <= px < max_x and 0 <= py < max_y:
+                try:
+                    stdscr.addstr(py, px, char, color)
+                except curses.error:
+                    pass
+
+        stdscr.refresh()
+        time.sleep(frame_delays[frame_idx])
+
+
+def draw_docking_success(stdscr, target_x, target_y, max_x, max_y, stars=None):
+    """Draw an animated docking success sequence."""
+    success = curses.color_pair(COLOR_SUCCESS) | curses.A_BOLD
+    target = curses.color_pair(COLOR_TARGET) | curses.A_BOLD
+    vehicle = curses.color_pair(COLOR_VEHICLE) | curses.A_BOLD
+    flash = curses.color_pair(COLOR_SUCCESS) | curses.A_BOLD | curses.A_BLINK
+
+    # Animation frames showing docking clamps engaging
+    frames = [
+        # Frame 1: Vehicle approaching final position
+        {
+            'port': [
+                "  ╔═══╗  ",
+                "  ║   ║  ",
+                "══╣ ◎ ╠══",
+                "  ║   ║  ",
+                "  ╚═══╝  ",
+            ],
+            'vehicle': (" ▲ ", "◄█►", " ▼ "),
+            'vehicle_offset': (-2, 0),
+        },
+        # Frame 2: Contact
+        {
+            'port': [
+                "  ╔═══╗  ",
+                "  ║   ║  ",
+                "══╣ ◎ ╠══",
+                "  ║   ║  ",
+                "  ╚═══╝  ",
+            ],
+            'vehicle': (" ▲ ", "◄█►", " ▼ "),
+            'vehicle_offset': (0, 0),
+            'flash': True,
+        },
+        # Frame 3: Clamps engaging - top and bottom
+        {
+            'port': [
+                "  ╔═╦═╗  ",
+                "  ║ ║ ║  ",
+                "══╣ ◎ ╠══",
+                "  ║ ║ ║  ",
+                "  ╚═╩═╝  ",
+            ],
+            'status': "CLAMPS ENGAGING",
+        },
+        # Frame 4: Clamps locked
+        {
+            'port': [
+                "  ╔═╦═╗  ",
+                "  ╠═╬═╣  ",
+                "══╣ ● ╠══",
+                "  ╠═╬═╣  ",
+                "  ╚═╩═╝  ",
+            ],
+            'status': "HARD DOCK",
+        },
+        # Frame 5: Seal confirmed
+        {
+            'port': [
+                "  ╔═╦═╗  ",
+                "  ╠═╬═╣  ",
+                "══╣ ✓ ╠══",
+                "  ╠═╬═╣  ",
+                "  ╚═╩═╝  ",
+            ],
+            'status': "SEAL CONFIRMED",
+            'lights': True,
+        },
+        # Frame 6: Docking complete
+        {
+            'port': [
+                "  ╔═╦═╗  ",
+                "  ╠═╬═╣  ",
+                "══╣ ✓ ╠══",
+                "  ╠═╬═╣  ",
+                "  ╚═╩═╝  ",
+            ],
+            'status': "DOCKING COMPLETE",
+            'lights': True,
+        },
+    ]
+
+    frame_delays = [0.15, 0.2, 0.25, 0.25, 0.3, 0.4]
+
+    for frame_idx, frame in enumerate(frames):
+        stdscr.clear()
+
+        # Draw starfield
+        if stars:
+            draw_starfield(stdscr, stars)
+
+        # Draw the docking port
+        port_lines = frame['port']
+        for i, line in enumerate(port_lines):
+            y = target_y - 2 + i
+            color = flash if frame.get('flash') else target
+            try:
+                stdscr.addstr(y, target_x - 4, line, color)
+            except curses.error:
+                pass
+
+        # Draw vehicle if specified
+        if 'vehicle' in frame:
+            vx_off, vy_off = frame.get('vehicle_offset', (0, 0))
+            vx, vy = target_x + vx_off, target_y + vy_off
+            v_lines = frame['vehicle']
+            color = flash if frame.get('flash') else vehicle
+            for i, line in enumerate(v_lines):
+                try:
+                    stdscr.addstr(vy - 1 + i, vx - 1, line, color)
+                except curses.error:
+                    pass
+
+        # Draw status message
+        if 'status' in frame:
+            status = frame['status']
+            sx = target_x - len(status) // 2
+            color = flash if frame.get('lights') else success
+            try:
+                stdscr.addstr(target_y + 4, sx, status, color)
+            except curses.error:
+                pass
+
+        # Draw indicator lights
+        if frame.get('lights'):
+            try:
+                stdscr.addstr(target_y - 3, target_x - 2, "●", success)
+                stdscr.addstr(target_y - 3, target_x + 2, "●", success)
+                stdscr.addstr(target_y + 3, target_x - 2, "●", success)
+                stdscr.addstr(target_y + 3, target_x + 2, "●", success)
+            except curses.error:
+                pass
+
+        stdscr.refresh()
+        time.sleep(frame_delays[frame_idx])
 
 
 def draw_fuel_gauge(stdscr, fuel, max_fuel, row):
@@ -354,13 +628,33 @@ def show_high_scores(stdscr):
     stdscr.getch()
 
 
+def show_play_again(stdscr, row=None):
+    """Show play again prompt. Returns True to play again, False to quit."""
+    stdscr.timeout(-1)  # Blocking input
+
+    if row is None:
+        max_y, max_x = stdscr.getmaxyx()
+        row = max_y - 3
+
+    prompt_color = curses.color_pair(COLOR_TARGET) | curses.A_BOLD
+    stdscr.addstr(row, 0, "Play again? [Y/N]", prompt_color)
+    stdscr.refresh()
+
+    while True:
+        key = stdscr.getch()
+        if key in [ord('y'), ord('Y')]:
+            return True
+        elif key in [ord('n'), ord('N'), ord('q'), ord('Q'), 27]:  # 27 = ESC
+            return False
+
+
 def main(stdscr, difficulty=None):
-    """Main game loop."""
+    """Main game loop. Returns True to play again, False to quit."""
     # Show menu if no difficulty provided
     if difficulty is None:
         difficulty = show_difficulty_menu(stdscr)
         if difficulty is None:
-            return  # User quit
+            return False  # User quit
 
     # Use difficulty settings
     fuel = difficulty.fuel
@@ -370,6 +664,9 @@ def main(stdscr, difficulty=None):
     docking_max_velocity = difficulty.docking_max_velocity
     # Get screen dimensions
     max_y, max_x = stdscr.getmaxyx()
+
+    # Generate starfield background
+    stars = generate_starfield(max_x, max_y)
 
     # Initial positions (use floats for smooth movement)
     # Starting position based on difficulty
@@ -381,13 +678,83 @@ def main(stdscr, difficulty=None):
     velocity_x, velocity_y = 0.0, 0.0
 
     stdscr.timeout(100)  # Non-blocking input with 100ms timeout
+    thrust_state = {}  # Track active thrusters for flame display
 
     while True:
+        # Handle input first so we can show thrust flames
+        try:
+            key = stdscr.getch()
+        except:
+            key = -1
+
+        # Process controls (only if fuel available)
+        thrust_state = {}
+        thrust_used = False
+        if fuel > 0:
+            if key == curses.KEY_UP:
+                velocity_y = apply_thrust(velocity_y, -thrust_power, MAX_VELOCITY)
+                thrust_state['up'] = True
+                thrust_used = True
+            elif key == curses.KEY_DOWN:
+                velocity_y = apply_thrust(velocity_y, thrust_power, MAX_VELOCITY)
+                thrust_state['down'] = True
+                thrust_used = True
+            elif key == curses.KEY_LEFT:
+                velocity_x = apply_thrust(velocity_x, -thrust_power, MAX_VELOCITY)
+                thrust_state['left'] = True
+                thrust_used = True
+            elif key == curses.KEY_RIGHT:
+                velocity_x = apply_thrust(velocity_x, thrust_power, MAX_VELOCITY)
+                thrust_state['right'] = True
+                thrust_used = True
+            elif key == ord("r") or key == ord("R"):
+                # Retro thrust - slow down in both axes
+                if abs(velocity_x) > thrust_power:
+                    velocity_x = apply_thrust(
+                        velocity_x,
+                        thrust_power if velocity_x < 0 else -thrust_power,
+                        MAX_VELOCITY,
+                    )
+                    # Flame on opposite side of movement
+                    if velocity_x > 0:
+                        thrust_state['right'] = True
+                    else:
+                        thrust_state['left'] = True
+                    thrust_used = True
+                else:
+                    velocity_x = 0
+                if abs(velocity_y) > thrust_power:
+                    velocity_y = apply_thrust(
+                        velocity_y,
+                        thrust_power if velocity_y < 0 else -thrust_power,
+                        MAX_VELOCITY,
+                    )
+                    # Flame on opposite side of movement
+                    if velocity_y > 0:
+                        thrust_state['down'] = True
+                    else:
+                        thrust_state['up'] = True
+                    thrust_used = True
+                else:
+                    velocity_y = 0
+
+        if key == ord("q") or key == ord("Q"):
+            break
+
+        # Consume fuel
+        if thrust_used:
+            fuel = max(0, fuel - fuel_per_thrust)
+
+        # Update vehicle position (inertia - keeps moving)
+        vehicle_x += velocity_x
+        vehicle_y += velocity_y
+
         stdscr.clear()
 
-        # Draw objects
+        # Draw background and objects
+        draw_starfield(stdscr, stars)
         draw_target(stdscr, target_x, target_y)
-        draw_vehicle(stdscr, vehicle_x, vehicle_y)
+        draw_vehicle(stdscr, vehicle_x, vehicle_y, thrust_state)
 
         # Calculate status
         distance = calculate_distance(vehicle_x, vehicle_y, target_x, target_y)
@@ -424,11 +791,18 @@ def main(stdscr, difficulty=None):
         # Check docking condition
         if distance < docking_threshold:
             if speed <= docking_max_velocity:
+                # Play docking animation
+                draw_docking_success(stdscr, target_x, target_y, max_x, max_y, stars)
+
                 # Calculate and display score with difficulty multiplier
                 base_score = calculate_score(fuel, speed)
                 final_score = int(base_score * difficulty.score_multiplier)
                 rating = get_score_rating(final_score)
                 score_color = curses.color_pair(get_score_color(final_score)) | curses.A_BOLD
+
+                # Show final score screen
+                stdscr.clear()
+                draw_starfield(stdscr, stars)
 
                 success_color = curses.color_pair(COLOR_SUCCESS) | curses.A_BOLD
                 stdscr.addstr(6, 0, "DOCKING SUCCESSFUL!", success_color)
@@ -461,71 +835,24 @@ def main(stdscr, difficulty=None):
                         stdscr.addstr(row, 0, "*** NEW HIGH SCORE! ***", hs_color)
                     else:
                         stdscr.addstr(row, 0, f"*** NEW #{rank} SCORE! ***", hs_color)
+                stdscr.refresh()
+                return show_play_again(stdscr, row + 2)
             else:
+                # Explosion for crashing into dock too fast
+                draw_explosion(stdscr, vehicle_x, vehicle_y, max_x, max_y, stars)
+                stdscr.clear()
+                draw_starfield(stdscr, stars)
+                draw_target(stdscr, target_x, target_y)
                 fail_color = curses.color_pair(COLOR_DANGER) | curses.A_BOLD
                 stdscr.addstr(6, 0, "DOCKING FAILED: Too fast!", fail_color)
                 stdscr.addstr(7, 0, "Score: 0", fail_color)
-            stdscr.refresh()
-            time.sleep(3)
-            break
+                stdscr.refresh()
+                return show_play_again(stdscr, 9)
 
         # Check for out of fuel
         if fuel <= 0:
             warn_color = curses.color_pair(COLOR_WARNING) | curses.A_BOLD
             stdscr.addstr(5, 0, "OUT OF FUEL - Drifting...", warn_color)
-
-        # Handle input
-        try:
-            key = stdscr.getch()
-        except:
-            key = -1
-
-        # Process controls (only if fuel available)
-        thrust_used = False
-        if fuel > 0:
-            if key == curses.KEY_UP:
-                velocity_y = apply_thrust(velocity_y, -thrust_power, MAX_VELOCITY)
-                thrust_used = True
-            elif key == curses.KEY_DOWN:
-                velocity_y = apply_thrust(velocity_y, thrust_power, MAX_VELOCITY)
-                thrust_used = True
-            elif key == curses.KEY_LEFT:
-                velocity_x = apply_thrust(velocity_x, -thrust_power, MAX_VELOCITY)
-                thrust_used = True
-            elif key == curses.KEY_RIGHT:
-                velocity_x = apply_thrust(velocity_x, thrust_power, MAX_VELOCITY)
-                thrust_used = True
-            elif key == ord("r") or key == ord("R"):
-                # Retro thrust - slow down in both axes
-                if abs(velocity_x) > thrust_power:
-                    velocity_x = apply_thrust(
-                        velocity_x,
-                        thrust_power if velocity_x < 0 else -thrust_power,
-                        MAX_VELOCITY,
-                    )
-                    thrust_used = True
-                else:
-                    velocity_x = 0
-                if abs(velocity_y) > thrust_power:
-                    velocity_y = apply_thrust(
-                        velocity_y,
-                        thrust_power if velocity_y < 0 else -thrust_power,
-                        MAX_VELOCITY,
-                    )
-                    thrust_used = True
-                else:
-                    velocity_y = 0
-
-        if key == ord("q") or key == ord("Q"):
-            break
-
-        # Consume fuel
-        if thrust_used:
-            fuel = max(0, fuel - fuel_per_thrust)
-
-        # Update vehicle position (inertia - keeps moving)
-        vehicle_x += velocity_x
-        vehicle_y += velocity_y
 
         # Check for collision with boundaries
         if (
@@ -534,25 +861,36 @@ def main(stdscr, difficulty=None):
             or vehicle_y <= 0
             or vehicle_y >= max_y - 1
         ):
+            # Clamp position to screen for explosion display
+            exp_x = max(3, min(max_x - 4, vehicle_x))
+            exp_y = max(3, min(max_y - 4, vehicle_y))
+            draw_explosion(stdscr, exp_x, exp_y, max_x, max_y, stars)
+            stdscr.clear()
+            draw_starfield(stdscr, stars)
             crash_color = curses.color_pair(COLOR_DANGER) | curses.A_BOLD
             stdscr.addstr(6, 0, "COLLISION DETECTED!", crash_color)
+            stdscr.addstr(7, 0, "Score: 0", crash_color)
             stdscr.refresh()
-            time.sleep(2)
-            break
+            return show_play_again(stdscr, 9)
 
         stdscr.refresh()
 
         # Small delay for smooth animation
         time.sleep(0.05)
 
+    # If we exit the loop normally (Q pressed), don't play again
+    return False
+
 
 if __name__ == "__main__":
     try:
         stdscr = init_curses()
-        main(stdscr)
+        play_again = True
+        while play_again:
+            play_again = main(stdscr)
     finally:
         # Clean up curses
-        curses.cbreak()
+        curses.nocbreak()
         stdscr.keypad(False)
         curses.echo()
         curses.endwin()
